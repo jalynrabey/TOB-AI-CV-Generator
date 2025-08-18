@@ -1,0 +1,5 @@
+{
+  "name": "AI Resume Optimizer",
+  "description": "An intelligent resume assistant that analyzes your current resume and a target job description to generate an optimized, professional resume. It provides constructive feedback, highlights key skills, and creates a polished final document downloadable as a PDF.",
+  "requestFramePermissions": []
+}
