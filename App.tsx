@@ -110,7 +110,7 @@ const App: React.FC = () => {
           setApiProvider={setApiProvider}
         />
         
-        <OutputSection data={generatedData} isLoading={isLoading} error={error} profilePicture={profilePicture}/>
+        <OutputSection data={generatedData} isLoading={isLoading} error={error} profilePicture={profilePicture} apiKey={apiKey} />
       </main>
       
       <footer className="text-center py-6 text-sm text-gray-500">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { GeminiResponse, ResumeData, Experience, Education, Project } from '../types';
-import { CheckIcon, WarningIcon, DownloadIcon, ResetIcon, GripVerticalIcon } from './icons';
+import type { GeminiResponse, ResumeData, Experience, Education, Project, Certification, Course } from '../types';
+import { CheckIcon, WarningIcon, DownloadIcon, ResetIcon, SparklesIcon, ArrowUpIcon, ArrowDownIcon, TrashIcon, ChevronDownIcon } from './icons';
+import { applySuggestion } from '../services/geminiService';
 import jsPDF from 'jspdf';
 
 interface OutputSectionProps {
@@ -8,12 +9,13 @@ interface OutputSectionProps {
   isLoading: boolean;
   error: string | null;
   profilePicture: string | null;
+  apiKey: string;
 }
 
 type SectionKey = keyof Omit<ResumeData, 'contactInfo'>;
+type PageKey = 'page1' | 'page2' | 'page3';
 type SectionOrderState = {
-    page1: SectionKey[];
-    page2: SectionKey[];
+    [key in PageKey]: SectionKey[];
 };
 
 const EditableField: React.FC<{ value: string; onChange: (newValue: string) => void; isTextArea?: boolean }> = ({ value, onChange, isTextArea = false }) => {
@@ -24,30 +26,68 @@ const EditableField: React.FC<{ value: string; onChange: (newValue: string) => v
     return <input type="text" value={value} onChange={(e) => onChange(e.target.value)} className={commonClasses} />;
 };
 
-const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, profilePicture }) => {
+const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, profilePicture, apiKey }) => {
     const [editableResume, setEditableResume] = useState<ResumeData | null>(null);
-    const [sectionOrder, setSectionOrder] = useState<SectionOrderState>({ page1: [], page2: [] });
+    const [sectionOrder, setSectionOrder] = useState<SectionOrderState>({ page1: [], page2: [], page3: [] });
+    const [appliedImprovements, setAppliedImprovements] = useState<Record<number, boolean>>({});
+    const [applyingImprovementIndex, setApplyingImprovementIndex] = useState<number | null>(null);
+    const [applyError, setApplyError] = useState<string | null>(null);
+    const [openMoveMenu, setOpenMoveMenu] = useState<string | null>(null);
 
-    const dragItem = useRef<{ pageKey: 'page1' | 'page2'; index: number } | null>(null);
-    const dragOverItem = useRef<{ pageKey: 'page1' | 'page2'; index: number } | null>(null);
-    const [draggedOverPosition, setDraggedOverPosition] = useState<{ pageKey: 'page1' | 'page2'; index: number } | null>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
     
     const populateInitialOrder = (resume: ResumeData) => {
-        const initialOrder: SectionKey[] = ['summary', 'skills', 'experience', 'projects', 'education'];
+        const initialOrder: SectionKey[] = [
+            'summary', 'skills', 'experience', 'projects', 'education', 
+            'certifications', 'extraCourses', 'languages'
+        ];
         const filteredOrder = initialOrder.filter(key => {
             const sectionData = resume[key];
             if (Array.isArray(sectionData)) return sectionData.length > 0;
             return !!sectionData;
         });
-        setSectionOrder({ page1: filteredOrder, page2: [] });
+        setSectionOrder({ page1: filteredOrder, page2: [], page3: [] });
     };
 
     useEffect(() => {
         if (data?.optimizedResume) {
             setEditableResume(data.optimizedResume);
             populateInitialOrder(data.optimizedResume);
+            setAppliedImprovements({});
+            setApplyError(null);
         }
     }, [data]);
+    
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+                setOpenMoveMenu(null);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const handleApplySuggestion = async (suggestion: string, index: number) => {
+        if (!editableResume) return;
+
+        if (!apiKey && !process.env.API_KEY) {
+            setApplyError('Cannot apply suggestion. API Key is missing from advanced options.');
+            return;
+        }
+
+        setApplyingImprovementIndex(index);
+        setApplyError(null);
+        try {
+            const updatedResume = await applySuggestion(editableResume, suggestion, apiKey);
+            setEditableResume(updatedResume);
+            setAppliedImprovements(prev => ({ ...prev, [index]: true }));
+        } catch (err: any) {
+            setApplyError(err.message || 'Failed to apply suggestion.');
+        } finally {
+            setApplyingImprovementIndex(null);
+        }
+    };
     
     if (isLoading) return null;
     if (error) {
@@ -83,62 +123,35 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, p
         if (data?.optimizedResume) {
             setEditableResume(data.optimizedResume);
             populateInitialOrder(data.optimizedResume);
+            setAppliedImprovements({});
+            setApplyError(null);
         }
     };
 
-    const handleDragStart = (e: React.DragEvent, pageKey: 'page1' | 'page2', index: number) => {
-        dragItem.current = { pageKey, index };
-        e.dataTransfer.effectAllowed = 'move';
-    };
-
-    const handleDragEnter = (e: React.DragEvent, pageKey: 'page1' | 'page2', index: number) => {
-        e.preventDefault();
-        dragOverItem.current = { pageKey, index };
-        setDraggedOverPosition({ pageKey, index });
-    };
-
-    const handleDragLeave = () => {
-        setDraggedOverPosition(null);
-    };
-
-    const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault();
-    };
-    
-    const handleDropOnPage = (pageKey: 'page1' | 'page2') => {
-       if (!dragItem.current) return;
-       const { pageKey: fromPage, index: fromIndex } = dragItem.current;
-       const toIndex = sectionOrder[pageKey].length;
-
-       if(fromPage === pageKey && fromIndex === toIndex) return;
-
-       dragOverItem.current = { pageKey, index: toIndex };
-       handleDrop();
-    }
-    
-    const handleDrop = () => {
-        if (!dragItem.current || !dragOverItem.current) {
-            setDraggedOverPosition(null);
-            return;
-        }
-
-        const { pageKey: fromPage, index: fromIndex } = dragItem.current;
-        const { pageKey: toPage, index: toIndex } = dragOverItem.current;
-
-        if (fromPage === toPage && fromIndex === toIndex) {
-            setDraggedOverPosition(null);
-            return;
-        }
-
+    const handleMoveSectionUpDown = (pageKey: PageKey, index: number, direction: 'up' | 'down') => {
         const newOrder = JSON.parse(JSON.stringify(sectionOrder));
-        const [draggedItem] = newOrder[fromPage].splice(fromIndex, 1);
-        newOrder[toPage].splice(toIndex, 0, draggedItem);
-        
+        const pageList = newOrder[pageKey];
+        if (direction === 'up' && index > 0) {
+            [pageList[index], pageList[index - 1]] = [pageList[index - 1], pageList[index]];
+        } else if (direction === 'down' && index < pageList.length - 1) {
+            [pageList[index], pageList[index + 1]] = [pageList[index + 1], pageList[index]];
+        }
         setSectionOrder(newOrder);
+    };
 
-        dragItem.current = null;
-        dragOverItem.current = null;
-        setDraggedOverPosition(null);
+    const handleMoveToPage = (fromPage: PageKey, fromIndex: number, toPage: PageKey) => {
+        if (fromPage === toPage) return;
+        const newOrder = JSON.parse(JSON.stringify(sectionOrder));
+        const [movedItem] = newOrder[fromPage].splice(fromIndex, 1);
+        newOrder[toPage].push(movedItem);
+        setSectionOrder(newOrder);
+        setOpenMoveMenu(null);
+    };
+
+    const handleDeleteSection = (pageKey: PageKey, index: number) => {
+        const newOrder = JSON.parse(JSON.stringify(sectionOrder));
+        newOrder[pageKey].splice(index, 1);
+        setSectionOrder(newOrder);
     };
 
     const handleDownloadPdf = () => {
@@ -156,7 +169,7 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, p
             }
         };
 
-        const { contactInfo, summary, skills, experience, education, projects } = editableResume;
+        const { contactInfo, summary, skills, experience, education, projects, languages, certifications, extraCourses } = editableResume;
 
         // --- HEADER ---
         const hasPicture = !!profilePicture;
@@ -276,6 +289,47 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, p
                     y += 20;
                 });
             }),
+            languages: () => drawSection('Languages', () => {
+                const languagesText = (languages || []).join('  •  ');
+                const textOptions = { maxWidth: pageWidth - margin * 2, align: 'justify' as const };
+                doc.setFontSize(10).setFont('helvetica', 'normal');
+                const { h: requiredHeight } = doc.getTextDimensions(languagesText, textOptions);
+
+                checkPageBreak(requiredHeight);
+                
+                doc.text(languagesText, margin, y, textOptions);
+                y += requiredHeight;
+            }),
+            certifications: () => drawSection('Certifications', () => {
+                (certifications || []).forEach(cert => {
+                    if (!cert) return;
+                    const requiredHeight = 14 + 14 + 10;
+                    checkPageBreak(requiredHeight);
+                    doc.setFontSize(11).setFont('helvetica', 'bold');
+                    doc.text(cert.name || '', margin, y);
+                    doc.setFont('helvetica', 'normal');
+                    doc.text(cert.date || '', pageWidth - margin, y, { align: 'right' });
+                    y += 14;
+                    doc.setFontSize(10).setFont('helvetica', 'italic');
+                    doc.text(cert.authority || '', margin, y);
+                    y += 20;
+                });
+            }),
+            extraCourses: () => drawSection('Extra Courses', () => {
+                (extraCourses || []).forEach(course => {
+                    if (!course) return;
+                    const requiredHeight = 14 + 14 + 10;
+                    checkPageBreak(requiredHeight);
+                    doc.setFontSize(11).setFont('helvetica', 'bold');
+                    doc.text(course.name || '', margin, y);
+                    doc.setFont('helvetica', 'normal');
+                    doc.text(course.dates || '', pageWidth - margin, y, { align: 'right' });
+                    y += 14;
+                    doc.setFontSize(10).setFont('helvetica', 'italic');
+                    doc.text(course.institution || '', margin, y);
+                    y += 20;
+                });
+            }),
         };
 
         const renderPageContent = (pageSections: SectionKey[]) => {
@@ -288,12 +342,19 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, p
             });
         }
         
-        renderPageContent(sectionOrder.page1);
-        
-        if (sectionOrder.page2.length > 0) {
-            doc.addPage();
-            y = margin;
-            renderPageContent(sectionOrder.page2);
+        let pagesRendered = 0;
+        const pageKeys: PageKey[] = ['page1', 'page2', 'page3'];
+
+        for (const pageKey of pageKeys) {
+            const sectionsOnPage = sectionOrder[pageKey];
+            if (sectionsOnPage.length > 0) {
+                if (pagesRendered > 0) {
+                    doc.addPage();
+                    y = margin;
+                }
+                renderPageContent(sectionsOnPage);
+                pagesRendered++;
+            }
         }
         
         doc.save(`${(contactInfo?.name || 'resume').replace(' ', '_')}_Resume.pdf`);
@@ -367,22 +428,57 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, p
                         ))}
                     </div>
                 );
+            case 'languages':
+                return (
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-700 mb-2">Languages</h3>
+                        <EditableField 
+                            value={(editableResume.languages || []).join(', ')} 
+                            onChange={val => handleResumeChange('languages', val.split(',').map(s => s.trim()))} 
+                        />
+                         <p className="text-xs text-gray-500 mt-1">Separate languages with a comma.</p>
+                    </div>
+                );
+             case 'certifications':
+                return (
+                    <div>
+                        <h3 className="text-xl font-semibold text-gray-700 mb-3 border-b pb-2">Certifications</h3>
+                        {(editableResume.certifications || []).map((cert, i) => (
+                            <div key={i} className="mb-4 p-4 border rounded-lg bg-gray-50 grid grid-cols-1 md:grid-cols-3 gap-2">
+                                <EditableField value={cert.name} onChange={val => handleListItemChange<Certification>('certifications', i, 'name', val)} />
+                                <EditableField value={cert.authority} onChange={val => handleListItemChange<Certification>('certifications', i, 'authority', val)} />
+                                <EditableField value={cert.date} onChange={val => handleListItemChange<Certification>('certifications', i, 'date', val)} />
+                            </div>
+                        ))}
+                    </div>
+                );
+            case 'extraCourses':
+                return (
+                    <div>
+                        <h3 className="text-xl font-semibold text-gray-700 mb-3 border-b pb-2">Extra Courses</h3>
+                        {(editableResume.extraCourses || []).map((course, i) => (
+                            <div key={i} className="mb-4 p-4 border rounded-lg bg-gray-50 grid grid-cols-1 md:grid-cols-3 gap-2">
+                                <EditableField value={course.name} onChange={val => handleListItemChange<Course>('extraCourses', i, 'name', val)} />
+                                <EditableField value={course.institution} onChange={val => handleListItemChange<Course>('extraCourses', i, 'institution', val)} />
+                                <EditableField value={course.dates} onChange={val => handleListItemChange<Course>('extraCourses', i, 'dates', val)} />
+                            </div>
+                        ))}
+                    </div>
+                );
             default:
                 return null;
         }
     };
-    
-    const renderDropIndicator = (pageKey: 'page1' | 'page2', index: number) => {
-        if (draggedOverPosition?.pageKey === pageKey && draggedOverPosition?.index === index) {
-            // Prevent indicator from showing on its own item unless it's a new position
-            if (dragItem.current && dragItem.current.pageKey === pageKey && (dragItem.current.index === index || dragItem.current.index + 1 === index)) {
-                if (dragOverItem.current && dragOverItem.current.pageKey === dragItem.current.pageKey && dragOverItem.current.index === dragItem.current.index) {
-                     return null;
-                }
-            }
-            return <div className="h-1 my-1 bg-indigo-500 rounded-full" />;
+
+    const getImprovementButtonClasses = (index: number) => {
+        const baseClasses = "flex items-center justify-center gap-2 text-sm font-semibold py-1.5 px-3 rounded-md transition-colors duration-200 disabled:cursor-not-allowed w-full sm:w-auto flex-shrink-0";
+        if (applyingImprovementIndex === index) {
+            return `${baseClasses} bg-indigo-100 text-indigo-700`;
         }
-        return null;
+        if (appliedImprovements[index]) {
+            return `${baseClasses} bg-green-100 text-green-800`;
+        }
+        return `${baseClasses} bg-yellow-200 text-yellow-900 hover:bg-yellow-300 disabled:bg-gray-200 disabled:text-gray-500`;
     };
     
     return (
@@ -393,15 +489,46 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, p
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-green-50 p-4 rounded-lg border border-green-200">
                         <h3 className="font-semibold text-green-800 mb-2 flex items-center gap-2"><CheckIcon className="w-5 h-5"/> Strengths</h3>
-                        <ul className="list-disc pl-5 space-y-1 text-green-700">
+                        <ul className="list-disc pl-5 space-y-1 text-green-700 text-sm">
                             {data.feedback.strengths.map((item, i) => <li key={i}>{item}</li>)}
                         </ul>
                     </div>
                     <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
                         <h3 className="font-semibold text-yellow-800 mb-2 flex items-center gap-2"><WarningIcon className="w-5 h-5"/> Areas for Improvement</h3>
-                         <ul className="list-disc pl-5 space-y-1 text-yellow-700">
-                            {data.feedback.improvements.map((item, i) => <li key={i}>{item}</li>)}
+                         <ul className="space-y-3 text-yellow-800">
+                            {data.feedback.improvements.map((item, i) => (
+                                <li key={i} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                    <span className="flex-grow text-sm">{item}</span>
+                                    <button
+                                        onClick={() => handleApplySuggestion(item, i)}
+                                        disabled={applyingImprovementIndex !== null || !!appliedImprovements[i]}
+                                        className={getImprovementButtonClasses(i)}
+                                        style={{ minWidth: '120px' }}
+                                    >
+                                        {applyingImprovementIndex === i ? (
+                                            <>
+                                                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                <span>Applying...</span>
+                                            </>
+                                        ) : appliedImprovements[i] ? (
+                                            <>
+                                                <CheckIcon className="w-4 h-4"/>
+                                                <span>Applied</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <SparklesIcon className="w-4 h-4"/>
+                                                <span>Apply Fix</span>
+                                            </>
+                                        )}
+                                    </button>
+                                </li>
+                            ))}
                         </ul>
+                        {applyError && <p className="text-red-600 text-sm mt-3 font-medium">{applyError}</p>}
                     </div>
                 </div>
             </div>
@@ -424,37 +551,53 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, isLoading, error, p
                     </button>
                  </div>
                 <h2 className="text-3xl font-bold text-gray-800 mb-2">Your Optimized Resume</h2>
-                <p className="text-sm text-gray-500 mb-6">Drag and drop sections between pages to organize your PDF.</p>
+                <p className="text-sm text-gray-500 mb-6">Use the controls on each section to organize your resume across up to three pages.</p>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8" onDragOver={handleDragOver}>
-                    {(['page1', 'page2'] as const).map(pageKey => (
-                        <div key={pageKey} className="p-4 border-2 border-dashed rounded-lg bg-gray-50/50 min-h-[400px] flex flex-col"
-                          onDrop={() => handleDropOnPage(pageKey)}
-                          onDragLeave={handleDragLeave}
-                        >
-                             <h3 className="text-center font-bold text-gray-500 mb-4 border-b pb-2">Page {pageKey === 'page1' ? 1 : 2}</h3>
-                             <div className="flex-grow space-y-2">
+                <div className="flex flex-col gap-8">
+                    {(['page1', 'page2', 'page3'] as const).map((pageKey, pageIndex) => (
+                        <div key={pageKey} className="p-4 border-2 border-dashed rounded-lg bg-gray-50/50 min-h-[200px] flex flex-col">
+                             <h3 className="text-center font-bold text-gray-500 mb-4 border-b pb-2">Page {pageIndex + 1}</h3>
+                             <div className="flex-grow space-y-4">
                                 {sectionOrder[pageKey].map((sectionKey, index) => (
-                                     <div key={sectionKey}>
-                                        {renderDropIndicator(pageKey, index)}
-                                        <div
-                                            draggable
-                                            onDragStart={(e) => handleDragStart(e, pageKey, index)}
-                                            onDragEnter={(e) => handleDragEnter(e, pageKey, index)}
-                                            onDrop={handleDrop}
-                                            className={`relative group bg-white p-6 rounded-lg transition-all border shadow-sm`}
-                                        >
-                                            <div className="absolute top-1/2 left-[-0.75rem] -translate-y-1/2 cursor-move opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-700">
-                                                <GripVerticalIcon className="w-6 h-6" />
+                                     <div key={sectionKey} className="relative group bg-white p-6 rounded-lg border shadow-sm">
+                                        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 backdrop-blur-sm rounded-full border p-1">
+                                            <button onClick={() => handleMoveSectionUpDown(pageKey, index, 'up')} disabled={index === 0} className="p-1.5 rounded-full hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed">
+                                                <ArrowUpIcon className="w-4 h-4 text-gray-600"/>
+                                            </button>
+                                            <button onClick={() => handleMoveSectionUpDown(pageKey, index, 'down')} disabled={index === sectionOrder[pageKey].length - 1} className="p-1.5 rounded-full hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed">
+                                                <ArrowDownIcon className="w-4 h-4 text-gray-600"/>
+                                            </button>
+                                            <div className="relative" ref={openMoveMenu === sectionKey ? menuRef : null}>
+                                                <button onClick={() => setOpenMoveMenu(openMoveMenu === sectionKey ? null : sectionKey)} className="p-1.5 rounded-full hover:bg-gray-200 flex items-center">
+                                                    <span className="text-xs font-semibold mr-1 ml-1 text-gray-600">Move</span>
+                                                    <ChevronDownIcon className="w-3 h-3 text-gray-600"/>
+                                                </button>
+                                                {openMoveMenu === sectionKey && (
+                                                    <div className="absolute right-0 mt-2 w-32 bg-white rounded-md shadow-lg border z-10">
+                                                        {(['page1', 'page2', 'page3'] as PageKey[]).map((toPageKey, toPageIndex) => (
+                                                            <button 
+                                                                key={toPageKey}
+                                                                onClick={() => handleMoveToPage(pageKey, index, toPageKey)}
+                                                                disabled={pageKey === toPageKey}
+                                                                className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 disabled:bg-gray-200 disabled:cursor-not-allowed"
+                                                            >
+                                                                Page {toPageIndex + 1}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
-                                            {renderSection(sectionKey)}
+                                             <div className="h-4 w-px bg-gray-200 mx-1"></div>
+                                            <button onClick={() => handleDeleteSection(pageKey, index)} className="p-1.5 rounded-full hover:bg-red-100 group/trash">
+                                                <TrashIcon className="w-4 h-4 text-gray-600 group-hover/trash:text-red-500"/>
+                                            </button>
                                         </div>
+                                        {renderSection(sectionKey)}
                                     </div>
                                 ))}
-                                {renderDropIndicator(pageKey, sectionOrder[pageKey].length)}
                                 {sectionOrder[pageKey].length === 0 && (
-                                    <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                                        Drop sections here
+                                    <div className="flex items-center justify-center h-full text-gray-400 text-sm p-10">
+                                        This page is empty. Move sections here from other pages.
                                     </div>
                                 )}
                              </div>

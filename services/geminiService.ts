@@ -1,5 +1,99 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { PersonalInfo, GeminiResponse } from '../types';
+import type { PersonalInfo, GeminiResponse, ResumeData, Certification, Course } from '../types';
+
+const resumeDataSchema = {
+    type: Type.OBJECT,
+    properties: {
+        contactInfo: {
+            type: Type.OBJECT,
+            properties: {
+                name: { type: Type.STRING },
+                email: { type: Type.STRING },
+                phone: { type: Type.STRING },
+                linkedin: { type: Type.STRING },
+            }
+        },
+        summary: {
+            type: Type.STRING,
+            description: "A powerful, concise professional summary of 3-5 sentences, optimized for the target role."
+        },
+        skills: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "A list of relevant technical and soft skills, tailored to the job description."
+        },
+        experience: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    role: { type: Type.STRING },
+                    company: { type: Type.STRING },
+                    dates: { type: Type.STRING },
+                    description: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                        description: "Action-oriented, results-driven bullet points."
+                    }
+                }
+            }
+        },
+        education: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    institution: { type: Type.STRING },
+                    degree: { type: Type.STRING },
+                    dates: { type: Type.STRING }
+                }
+            }
+        },
+        projects: {
+            type: Type.ARRAY,
+            items: {
+                 type: Type.OBJECT,
+                 properties: {
+                    name: { type: Type.STRING },
+                    description: { 
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                        description: "Bullet points describing the project."
+                    }
+                 }
+            }
+        },
+        languages: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "A list of languages and proficiency levels (e.g., 'English (Native)', 'Spanish (Conversational)'). If not present, provide an empty array."
+        },
+        certifications: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING },
+                    authority: { type: Type.STRING, description: "The issuing organization." },
+                    date: { type: Type.STRING, description: "The date of certification." }
+                }
+            },
+            description: "A list of relevant certifications. If not present, provide an empty array."
+        },
+        extraCourses: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING },
+                    institution: { type: Type.STRING },
+                    dates: { type: Type.STRING }
+                }
+            },
+            description: "A list of extra courses or professional development. If not present, provide an empty array."
+        }
+    }
+};
 
 const responseSchema = {
     type: Type.OBJECT,
@@ -19,70 +113,7 @@ const responseSchema = {
                 }
             }
         },
-        optimizedResume: {
-            type: Type.OBJECT,
-            properties: {
-                contactInfo: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING },
-                        email: { type: Type.STRING },
-                        phone: { type: Type.STRING },
-                        linkedin: { type: Type.STRING },
-                    }
-                },
-                summary: {
-                    type: Type.STRING,
-                    description: "A powerful, concise professional summary of 3-5 sentences, optimized for the target role."
-                },
-                skills: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: "A list of relevant technical and soft skills, tailored to the job description."
-                },
-                experience: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            role: { type: Type.STRING },
-                            company: { type: Type.STRING },
-                            dates: { type: Type.STRING },
-                            description: {
-                                type: Type.ARRAY,
-                                items: { type: Type.STRING },
-                                description: "Action-oriented, results-driven bullet points."
-                            }
-                        }
-                    }
-                },
-                education: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            institution: { type: Type.STRING },
-                            degree: { type: Type.STRING },
-                            dates: { type: Type.STRING }
-                        }
-                    }
-                },
-                projects: {
-                    type: Type.ARRAY,
-                    items: {
-                         type: Type.OBJECT,
-                         properties: {
-                            name: { type: Type.STRING },
-                            description: { 
-                                type: Type.ARRAY,
-                                items: { type: Type.STRING },
-                                description: "Bullet points describing the project."
-                            }
-                         }
-                    }
-                }
-            }
-        }
+        optimizedResume: resumeDataSchema
     }
 };
 
@@ -130,6 +161,9 @@ export const generateResume = async (
         - **experience**: Rephrase bullet points to be action-oriented and results-driven, incorporating keywords from the job description.
         - **education**: Extract and list educational background.
         - **projects**: If present in the original resume, extract and list projects. If not, provide an empty array.
+        - **languages**: If present, extract any languages listed. If not, provide an empty array.
+        - **certifications**: If present, extract any certifications. If not, provide an empty array.
+        - **extraCourses**: If present, extract any extra courses or professional development. If not, provide an empty array.
     `;
     
     try {
@@ -146,13 +180,78 @@ export const generateResume = async (
         const jsonText = response.text.trim();
         const parsedResponse = JSON.parse(jsonText) as GeminiResponse;
         
-        if (!parsedResponse.optimizedResume.projects) {
-            parsedResponse.optimizedResume.projects = [];
+        // Ensure all array-based fields exist to prevent render errors
+        if (parsedResponse.optimizedResume) {
+            const resume = parsedResponse.optimizedResume;
+            if (!resume.skills) resume.skills = [];
+            if (!resume.experience) resume.experience = [];
+            if (!resume.education) resume.education = [];
+            if (!resume.projects) resume.projects = [];
+            if (!resume.languages) resume.languages = [];
+            if (!resume.certifications) resume.certifications = [];
+            if (!resume.extraCourses) resume.extraCourses = [];
         }
 
         return parsedResponse;
     } catch (error) {
         console.error("Error generating resume with Gemini API:", error);
         throw new Error("Failed to generate the resume. Please check your inputs and API key, then try again.");
+    }
+};
+
+export const applySuggestion = async (
+  currentResume: ResumeData,
+  suggestion: string,
+  apiKey: string
+): Promise<ResumeData> => {
+    const keyToUse = apiKey || process.env.API_KEY;
+    if (!keyToUse) {
+        throw new Error("API key not provided. Please provide an API key in the advanced options.");
+    }
+
+    const ai = new GoogleGenAI({ apiKey: keyToUse });
+
+    const prompt = `
+        Act as an expert resume editor. Your task is to apply a single, specific improvement to the provided resume JSON.
+
+        **Instruction to apply:**
+        "${suggestion}"
+
+        **Current Resume JSON:**
+        ---
+        ${JSON.stringify(currentResume, null, 2)}
+        ---
+
+        Apply ONLY the requested improvement. Do not make any other changes.
+        Return the complete, updated resume as a single, valid JSON object that strictly adheres to the provided schema. Do not include any introductory text, explanations, or markdown formatting.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: resumeDataSchema,
+                temperature: 0.3,
+            },
+        });
+
+        const jsonText = response.text.trim();
+        const parsedResponse = JSON.parse(jsonText) as ResumeData;
+        
+        // Ensure all array-based fields exist to prevent render errors
+        if (!parsedResponse.skills) parsedResponse.skills = [];
+        if (!parsedResponse.experience) parsedResponse.experience = [];
+        if (!parsedResponse.education) parsedResponse.education = [];
+        if (!parsedResponse.projects) parsedResponse.projects = [];
+        if (!parsedResponse.languages) parsedResponse.languages = [];
+        if (!parsedResponse.certifications) parsedResponse.certifications = [];
+        if (!parsedResponse.extraCourses) parsedResponse.extraCourses = [];
+
+        return parsedResponse;
+    } catch (error) {
+        console.error("Error applying suggestion with Gemini API:", error);
+        throw new Error("Failed to apply the suggestion. The AI model may have returned an unexpected format. Please try again or edit manually.");
     }
 };

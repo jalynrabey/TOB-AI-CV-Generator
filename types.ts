@@ -24,6 +24,18 @@ export interface Project {
     description: string[];
 }
 
+export interface Certification {
+    name: string;
+    authority: string;
+    date: string;
+}
+
+export interface Course {
+    name: string;
+    institution: string;
+    dates: string;
+}
+
 export interface ResumeData {
   contactInfo: PersonalInfo;
   summary: string;
@@ -31,6 +43,9 @@ export interface ResumeData {
   experience: Experience[];
   education: Education[];
   projects: Project[];
+  languages?: string[];
+  certifications?: Certification[];
+  extraCourses?: Course[];
 }
 
 export interface GeminiResponse {
